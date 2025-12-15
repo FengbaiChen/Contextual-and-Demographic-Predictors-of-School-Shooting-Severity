@@ -1,4 +1,4 @@
-README.txt — Supplemental Materials (Reproducibility Package)
+README — Supplemental Materials (Reproducibility Package)
 =============================================================
 
 This folder contains the code and data needed to reproduce our project analyses.
