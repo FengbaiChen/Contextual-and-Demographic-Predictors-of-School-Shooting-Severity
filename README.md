@@ -1,4 +1,4 @@
-**2025 Brown University Shooting almost fit with our research conclusion.**
+**2025 Brown University Shooting🕯️ almost fit with our research conclusion.**
 =============================================================
 README — Supplemental Materials (Reproducibility Package)
 =============================================================
