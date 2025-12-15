@@ -125,40 +125,6 @@ cat("Posterior median tau^2 =", median(tau2_save), "\n")
 
 ```
 
-### Results  
-**Descriptive summary** indicates that **Friday** has the highest mean casualties with:  
-$$
-\overline{T}_{Fri} = 1.826,\quad n_{Fri}=339,
-$$  
-followed by **Tuesday**:  
-$$
-\overline{T}_{Tue} = 1.656,\quad n_{Tue}=285.
-$$  
-Weekend sample sizes are much smaller (Sat $n=54$, Sun $n=40$). Importantly, the **median is 1 for all weekdays**, suggesting a right-skewed distribution. The maximum on Friday is notably high (max = 76), indicating potential influence from rare extreme events.
-
-**Bootstrap comparison** between the top two weekdays yields:  
-$$
-\Delta_{\text{obs}} = 0.170,
-$$  
-with a 95% CI of:  
-$$
-[-0.486,\ 0.887],
-$$  
-and a one-sided bootstrap $p \approx 0.306$. This does not support a reliable mean difference between Friday and Tuesday.
-
-**Permutation test** for an overall weekday effect gives:  
-$$
-p = 0.784,
-$$  
-suggesting that the observed variation in weekday means is highly consistent with random label assignment under the null of no weekday association.
-
-**Jackknife stability** shows that Friday remains the top weekday in 1522 leave-one-out samples, while Tuesday becomes top only 1 time. This suggests ranking stability to single-incident removal, though stability alone does not imply a statistically meaningful weekday effect.
-
-### Interpretation  
-Although **Friday** appears to have the highest mean casualties descriptively, resampling-based inference provides little evidence of a systematic weekday effect. The identical medians across weekdays and the presence of extreme values imply that mean-based differences may reflect distributional skew and rare high-casualty incidents rather than a robust weekly pattern.
-
-### Takeaway  
-**Friday is the highest-casualty weekday by observed mean**, but **bootstrap and permutation results do not support a statistically significant or generalizable day-of-week effect** in this dataset.
 
 ---------------------------------------------------
 
@@ -558,9 +524,6 @@ ggplot(data.frame(F_perm = F_perm), aes(x = F_perm)) +
                         "| p-value =", signif(p_perm, 3)),
        x = "F-statistic", y = "Count")
 ```
-
-### Result
-A permutation test was conducted to provide a nonparametric assessment of whether victim counts differ across age groups. The observed F-statistic from the one-way comparison of victim counts across the four age groups was 0.644. After randomly permuting age-group labels 5,000 times, the permutation distribution produced a p-value of 0.548, indicating that more than half of the randomized samples showed a test statistic at least as large as the observed one. The observed F-statistic lay near the center of the permutation distribution rather than in its upper tail. This result shows that the variation in victim counts across age groups is fully consistent with random chance under the null hypothesis of no age effect. Thus, the permutation test independently confirms the regression finding that victim age group is not significantly related to the number of victims per school shooting event.
 
 ---------------------------------------------------------------------------------------------------------------------
 
