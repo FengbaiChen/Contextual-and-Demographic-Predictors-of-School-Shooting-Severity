@@ -1,4 +1,4 @@
-README — Supplemental Materials (Reproducibility Package)
+README.txt — Supplemental Materials (Reproducibility Package)
 =============================================================
 
 This folder contains the code and data needed to reproduce our project analyses.
@@ -130,5 +130,16 @@ Analysis 2 — Student vs. Non-Student Shooter Fatalities (Bootstrap + Permutati
 - Interpretation:
   If the CI excludes 0 and permutation p-value is small, evidence supports a real mean difference.
 
-Analysis 3 — Victim Age Group vs. Victim Count (NB Regression + Permutation)
-- Negative binomial regression
+Analysis 3 — Victim Age Group vs. Victim Count (Negative Binomial Regression + Permutation)
+- Negative binomial regression:
+  fits a count regression model victim_count ~ age_group using only incidents with observed age_group.
+  The output includes regression coefficients, p-values, and incident rate ratios (IRRs = exp(coef)),
+  along with confidence intervals for IRRs.
+- Model comparison:
+  AIC(fit_pois, fit_nb) is printed to compare Poisson vs. negative binomial fit.
+- Permutation test:
+  prints a randomization-based p-value obtained by permuting age_group labels (keeping victim_count fixed).
+- Interpretation:
+  IRRs close to 1 with confidence intervals containing 1, and a large permutation p-value, suggest little evidence
+  that victim counts differ systematically across age groups in the observed-age subset.
+
