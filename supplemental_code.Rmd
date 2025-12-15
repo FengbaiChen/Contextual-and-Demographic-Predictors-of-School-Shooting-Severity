@@ -1,0 +1,566 @@
+---
+title: "Supplemental Materials — Code for Reproducibility"
+output: pdf_document
+date: "2025-12-05"
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##### I.Introduction
+School shootings in the United States represent a complex and multifactorial form of violence, with incident severity varying widely across contexts.  While extensive public discussion focuses on demographic patterns and situational factors, the empirical relationships between these characteristics and actual harm remain unclear.  In this project, we analyze the *school_shooting_db_20200316.csv* dataset to examine whether specific features of shooters, victims, and incident timing meaningfully predict fatality or victim counts.
+
+Our project addresses three connected research questions:
+
+1.  **Weekday Effects on Casualties**
+Do certain days of the week show systematically higher casualty counts, and are these descriptive differences statistically reliable?
+
+2.  **Shooter Identity and Fatalities**
+Do student shooters and non-student shooters differ in the number of fatalities they cause, and is this difference statistically significant and robust?
+
+3.  **Victim Age Group and Total Victim Count**
+Are shootings involving younger versus older victims associated with differences in incident severity, and do statistical models detect any meaningful effect of age group?
+
+Across these three components, we consistently employ non-parametric resampling, simulation-based inference, and generalized linear modeling to reduce reliance on strong assumptions and to test whether descriptive patterns are supported by statistical evidence.  By integrating multiple analytical perspectives, this project aims to clarify which commonly discussed characteristics are—versus are not—associated with the severity of school shooting incidents.
+
+---------------------------------------------------------------------------------------------------------------------
+
+##### II.Data
+We use a comprehensive dataset of school shooting incidents compiled by the Center for Homeland Defense and Security (CHDS) at the Naval Postgraduate School. The CHDS database aims to document every known instance in which a firearm is discharged or brandished on school property, regardless of the number of victims, the intent of the shooter, or the circumstances surrounding the event. The dataset draws primarily from mainstream news reporting, with additional verification conducted through police documents and court records when available. Although the verification process is ongoing, the database remains one of the most complete public records of school-related gun violence in the United States.
+
+For our project, we rely on variables detailing the location of each incident, the number of fatalities, the total number of victims, the identity and affiliation of the shooter, and temporal information such as the time and day of the week of the shooting. These variables allow us to investigate the three dimensions central to our research questions: temporal patterns in severity, differences between student and non-student shooters, and the relationship between victim age groups and casualty counts.
+
+---------------------------------------------------------------------------------------------------------------------
+
+##### III.Arguments
+
+#### 1.Weekday Effects on Casualties (Day-of-Week Analysis) (Yaoyu Chen)
+
+Code:
+
+```{r}
+library(readr); library(dplyr)
+
+df <- read_csv("school_shooting_db_20200316.csv", show_col_types = FALSE)
+
+d <- df %>%
+  mutate(
+    T = as.numeric(`Total Injured/Killed Victims`),
+    weekday = factor(`Day of week (formula)`, levels=c("Mon","Tue","Wed","Thu","Fri","Sat","Sun"))
+  ) %>%
+  filter(!is.na(T), !is.na(weekday)) %>%
+  mutate(y = log1p(T))
+
+y <- d$y
+g <- as.integer(d$weekday)
+G <- nlevels(d$weekday)
+n <- length(y)
+
+# hyperparams (weakly informative)
+a_sig <- 2; b_sig <- 2
+a_tau <- 2; b_tau <- 2
+mu0_mean <- 0; mu0_sd <- 10
+
+# init
+mu_g <- tapply(y, g, mean)
+mu0 <- mean(mu_g)
+sig2 <- var(y)
+tau2 <- var(mu_g)
+
+S <- 4000
+burn <- 1000
+
+mu_g_save <- matrix(NA, nrow=S-burn, ncol=G)
+mu0_save <- numeric(S-burn)
+sig2_save <- numeric(S-burn)
+tau2_save <- numeric(S-burn)
+
+for (s in 1:S) {
+
+  # 1) sample mu_g | rest  (normal)
+  for (gg in 1:G) {
+    idx <- which(g == gg)
+    ng <- length(idx)
+    ygbar <- mean(y[idx])
+
+    v <- 1 / (ng/sig2 + 1/tau2)
+    m <- v * (ng*ygbar/sig2 + mu0/tau2)
+    mu_g[gg] <- rnorm(1, m, sqrt(v))
+  }
+
+  # 2) sample mu0 | rest (normal)
+  v0 <- 1 / (G/tau2 + 1/mu0_sd^2)
+  m0 <- v0 * (sum(mu_g)/tau2 + mu0_mean/mu0_sd^2)
+  mu0 <- rnorm(1, m0, sqrt(v0))
+
+  # 3) sample sig2 | rest (Inv-Gamma)
+  rss <- sum((y - mu_g[g])^2)
+  sig2 <- 1 / rgamma(1, shape = a_sig + n/2, rate = b_sig + rss/2)
+
+  # 4) sample tau2 | rest (Inv-Gamma)
+  rmu <- sum((mu_g - mu0)^2)
+  tau2 <- 1 / rgamma(1, shape = a_tau + G/2, rate = b_tau + rmu/2)
+
+  if (s > burn) {
+    k <- s - burn
+    mu_g_save[k,] <- mu_g
+    mu0_save[k] <- mu0
+    sig2_save[k] <- sig2
+    tau2_save[k] <- tau2
+  }
+}
+
+colnames(mu_g_save) <- levels(d$weekday)
+
+# posterior summaries
+post_ci <- apply(mu_g_save, 2, quantile, probs=c(0.025, 0.5, 0.975))
+print(t(post_ci))
+
+# Example: posterior prob Fri > Tue
+p_fri_gt_tue <- mean(mu_g_save[,"Fri"] > mu_g_save[,"Tue"])
+cat("P(mu_Fri > mu_Tue | data) =", p_fri_gt_tue, "\n")
+
+# weekday effect strength
+cat("Posterior median tau^2 =", median(tau2_save), "\n")
+
+```
+
+### Results  
+**Descriptive summary** indicates that **Friday** has the highest mean casualties with:  
+$$
+\overline{T}_{Fri} = 1.826,\quad n_{Fri}=339,
+$$  
+followed by **Tuesday**:  
+$$
+\overline{T}_{Tue} = 1.656,\quad n_{Tue}=285.
+$$  
+Weekend sample sizes are much smaller (Sat $n=54$, Sun $n=40$). Importantly, the **median is 1 for all weekdays**, suggesting a right-skewed distribution. The maximum on Friday is notably high (max = 76), indicating potential influence from rare extreme events.
+
+**Bootstrap comparison** between the top two weekdays yields:  
+$$
+\Delta_{\text{obs}} = 0.170,
+$$  
+with a 95% CI of:  
+$$
+[-0.486,\ 0.887],
+$$  
+and a one-sided bootstrap $p \approx 0.306$. This does not support a reliable mean difference between Friday and Tuesday.
+
+**Permutation test** for an overall weekday effect gives:  
+$$
+p = 0.784,
+$$  
+suggesting that the observed variation in weekday means is highly consistent with random label assignment under the null of no weekday association.
+
+**Jackknife stability** shows that Friday remains the top weekday in 1522 leave-one-out samples, while Tuesday becomes top only 1 time. This suggests ranking stability to single-incident removal, though stability alone does not imply a statistically meaningful weekday effect.
+
+### Interpretation  
+Although **Friday** appears to have the highest mean casualties descriptively, resampling-based inference provides little evidence of a systematic weekday effect. The identical medians across weekdays and the presence of extreme values imply that mean-based differences may reflect distributional skew and rare high-casualty incidents rather than a robust weekly pattern.
+
+### Takeaway  
+**Friday is the highest-casualty weekday by observed mean**, but **bootstrap and permutation results do not support a statistically significant or generalizable day-of-week effect** in this dataset.
+
+---------------------------------------------------
+
+#### 2.Student vs. Non-Student Shooter Effects on Fatalities(Zhanzhan Liang)
+
+### Methods (Overview)  
+
+We used two complementary non-parametric frameworks to assess whether the observed mean difference reflects a genuine underlying effect rather than chance.
+
+### (1) Bootstrap (Non-parametric Resampling)
+We applied the bootstrap to estimate the **sampling uncertainty** of the mean fatality difference:
+
+$$
+\Delta_{\text{obs}} = \overline{K}_{\text{student}}
+- \overline{K}_{\text{nonstudent}},
+\quad K = \text{number of fatalities}.
+$$
+
+By repeatedly resampling (with replacement) from each group and recomputing  
+\(\Delta^{*} = \overline{K}^*_{\text{student}} - \overline{K}^*_{\text{nonstudent}}\),  
+we constructed a **95% bootstrap confidence interval**.
+
+This interval quantifies the stability of the observed gap and allows us to evaluate whether it is consistently above (or below) zero.
+
+```{r}
+### ============================================
+### 0. Read data and set up variables
+### ============================================
+
+# Read the CSV file; keep original column names (with spaces)
+shoot <- read.csv("school_shooting_db_20200316.csv", check.names = FALSE)
+
+# Create a simple shooter_type variable: "student" vs "nonstudent"
+# We treat these categories as "student shooters"
+student_levels <- c("Student",
+                    "Former Student",
+                    "Visiting Student",
+                    "Students from Rival School")
+
+shoot$shooter_type <- NA_character_
+shoot$shooter_type[shoot$`Shooter's Affiliation with School` %in% student_levels] <- "student"
+shoot$shooter_type[!(shoot$`Shooter's Affiliation with School` %in% student_levels) &
+                     !is.na(shoot$`Shooter's Affiliation with School`)] <- "nonstudent"
+
+# Keep only rows with non-missing fatalities and shooter_type
+use_idx <- !is.na(shoot$`Killed (includes shooter)`) & !is.na(shoot$shooter_type)
+dat <- shoot[use_idx, ]
+
+# For convenience, define a shorter name for fatalities
+dat$killed <- dat$`Killed (includes shooter)`
+
+
+### ============================================
+### 1. Bootstrap CI for Difference in Means
+###    (Student shooters - Nonstudent shooters)
+### ============================================
+
+# Split into two groups
+student_killed     <- dat$killed[dat$shooter_type == "student"]
+nonstudent_killed  <- dat$killed[dat$shooter_type == "nonstudent"]
+
+# Observed difference in means
+obs_diff <- mean(student_killed) - mean(nonstudent_killed)
+obs_diff
+
+# Number of bootstrap resamples
+B <- 10000
+boot_diff <- numeric(B)
+
+set.seed(406)  # Ensures reproducibility
+
+# Bootstrap resampling procedure
+for (b in 1:B) {
+
+  # Resample within each group (sampling with replacement)
+  boot_student     <- sample(student_killed, length(student_killed), replace = TRUE)
+  boot_nonstudent  <- sample(nonstudent_killed, length(nonstudent_killed), replace = TRUE)
+
+  # Record the mean difference for each iteration
+  boot_diff[b] <- mean(boot_student) - mean(boot_nonstudent)
+}
+
+# Compute the bootstrap 95% CI using percentile method
+boot_CI <- quantile(boot_diff, probs = c(0.025, 0.975))
+
+# Print final results
+cat("Observed Difference (Student - Nonstudent):", obs_diff, "\n")
+cat("Bootstrap 95% CI:", boot_CI[1], "to", boot_CI[2], "\n")
+```
+
+### Results  
+Bootstrap Estimation of the Mean Difference  
+The observed mean difference in fatalities between student and non-student shooters is:
+
+\[\Delta_{\text{obs}} = 0.1268485.
+\]
+
+This indicates that, on average, **student shooters cause approximately 0.13 more fatalities** per incident than non-student shooters. The 95% bootstrap percentile confidence interval is:
+
+\[[0.0201,\ 0.2491].
+\]
+
+Because the entire interval lies above zero, the bootstrap results suggest that the positive difference is **statistically stable** and unlikely to be due to sampling variability alone. However, the magnitude of the effect remains **small**, with plausible values ranging from almost no difference (0.02) to about one quarter of a fatality.
+
+
+### (2) Permutation Test (Randomization-Based Inference)
+To determine whether the group difference could arise under the **null hypothesis** that fatalities are unrelated to shooter type, we used a permutation test.
+
+The logic:  
+- Keep fatality counts fixed.  
+- Randomly **shuffle the shooter-type labels** across incidents.  
+- Recalculate the mean difference for each shuffled dataset.  
+
+This generates the **null distribution** of mean differences under the assumption of no real group effect.
+
+The **p-value** is the probability of obtaining a difference as extreme as \(\Delta_{\text{obs}}\) purely by random label assignment. A small p-value indicates that the observed difference is unlikely to be due to chance.
+
+```{r}
+### ============================================
+### 0. Read data and set up variables (same as before)
+### ============================================
+
+shoot <- read.csv("school_shooting_db_20200316.csv", check.names = FALSE)
+
+# Define which affiliations count as "student shooters"
+student_levels <- c("Student",
+                    "Former Student",
+                    "Visiting Student",
+                    "Students from Rival School")
+
+shoot$shooter_type <- NA_character_
+shoot$shooter_type[shoot$`Shooter's Affiliation with School` %in% student_levels] <- "student"
+shoot$shooter_type[!(shoot$`Shooter's Affiliation with School` %in% student_levels) &
+                     !is.na(shoot$`Shooter's Affiliation with School`)] <- "nonstudent"
+
+# Keep only rows with non-missing fatalities and shooter_type
+use_idx <- !is.na(shoot$`Killed (includes shooter)`) & !is.na(shoot$shooter_type)
+dat <- shoot[use_idx, ]
+
+# Convenience: create a short name for fatalities
+dat$killed <- dat$`Killed (includes shooter)`
+
+
+### ============================================
+### 1. Observed difference in means
+### ============================================
+
+student_killed     <- dat$killed[dat$shooter_type == "student"]
+nonstudent_killed  <- dat$killed[dat$shooter_type == "nonstudent"]
+
+obs_diff <- mean(student_killed) - mean(nonstudent_killed)
+cat("Observed Difference (Student - Nonstudent):", obs_diff, "\n")
+
+
+### ============================================
+### 2. Permutation Test (two-sided)
+###     H0: mean_student = mean_nonstudent
+### ============================================
+
+set.seed(406)  # for reproducibility
+
+B <- 10000                         # number of permutations
+perm_diff <- numeric(B)            # store permuted differences
+
+# Combine all fatalities into one vector
+all_killed <- dat$killed
+group      <- dat$shooter_type     # original labels
+
+n_student    <- sum(group == "student")
+n_nonstudent <- sum(group == "nonstudent")
+
+for (b in 1:B) {
+  # Permute group labels
+  perm_labels <- sample(group, length(group), replace = FALSE)
+
+  # Recompute group means under permuted labels
+  perm_student     <- all_killed[perm_labels == "student"]
+  perm_nonstudent  <- all_killed[perm_labels == "nonstudent"]
+
+  perm_diff[b] <- mean(perm_student) - mean(perm_nonstudent)
+}
+
+# Two-sided p-value: how extreme the observed diff is under H0
+p_value_two_sided <- mean(abs(perm_diff) >= abs(obs_diff))
+
+# (Optional) One-sided p-value if you only care about "student > nonstudent"
+p_value_one_sided <- mean(perm_diff >= obs_diff)
+
+cat("Permutation test two-sided p-value:", p_value_two_sided, "\n")
+cat("Permutation test one-sided p-value (student > nonstudent):", p_value_one_sided, "\n")
+```
+
+### Permutation Test of the Group Difference  
+The permutation test yields a two-sided p-value of:
+
+\[p = 0.0335,
+\]
+
+and a one-sided p-value of:
+
+\[p = 0.0165.
+\]
+
+Under the null hypothesis that fatalities are unrelated to shooter type, differences as large as the observed value occur only about **3.35%** of the time in random label assignments. This provides **statistically significant evidence** (at the 5% level) that the mean fatality counts differ between student and non-student shooters. 
+
+The one-sided test further supports the directional hypothesis that **student shooters tend to cause more fatalities** than non-student shooters, with only **1.65%** of the permuted datasets producing a difference as large as the observed positive gap.
+
+Together with the bootstrap results, the permutation test confirms that the difference—although small in magnitude—is **unlikely to be due to chance**, and there is consistent statistical evidence that shooter identity has a measurable, modest association with the number of fatalities in school shooting incidents.
+
+---------------------------------------------------
+
+#### 3. Associations between the number of victims in a school shooting and the age group of the victims (Yiyang Wang)
+
+### 0. Setup: load data and libraries
+
+```{r}
+## ---- setup ----
+library(dplyr)
+library(MASS)      
+library(ggplot2)   
+
+dat_raw <- read.csv("school_shooting_db_20200316.csv",
+                    stringsAsFactors = FALSE)
+```
+
+### 1. Create victim count, age groups, and missing-age indicator
+
+```{r}
+## ---- create variables ----
+dat <- dat_raw %>%
+  mutate(
+    # total victims (killed + wounded)
+    victim_count = `Total.Injured.Killed.Victims`,
+    
+    # numeric victim age (may contain NA)
+    victim_age   = `Victim.s.age.s.`,
+    
+    # 4-group age variable 
+    age_group = case_when(
+      !is.na(victim_age) & victim_age >= 0  & victim_age <= 11 ~ "Elementary",
+      !is.na(victim_age) & victim_age >= 12 & victim_age <= 14 ~ "Middle",
+      !is.na(victim_age) & victim_age >= 15 & victim_age <= 18 ~ "High",
+      !is.na(victim_age) & victim_age >= 19                   ~ "Adult",
+      TRUE ~ NA_character_
+    ),
+    
+    # missing-age indicator
+    age_missing = if_else(is.na(victim_age), 1L, 0L)
+  )
+
+# make factors
+dat <- dat %>%
+  mutate(
+    age_group   = factor(age_group,
+                         levels = c("Elementary", "Middle", "High", "Adult")),
+    age_missing = factor(age_missing, levels = c(0,1),
+                         labels = c("ObservedAge", "MissingAge")),
+    school_type = factor(`School.Type`)  # if you want to use it as a control
+  )
+
+table(dat$age_group, useNA = "ifany")
+summary(dat$victim_count)
+```
+
+### 2. Method 1 – Negative binomial regression (with missing-age indicator)
+
+### Basic description
+We model the number of victims per shooting event using a negative binomial generalized linear model with a log link to account for over-dispersed count data. Victim age is grouped into four categories (Elementary: 0–11, Middle: 12–14, High: 15–18, Adult: 19+). A binary missing-age indicator is included to account for incomplete age information. Parameters are estimated using maximum likelihood.
+### Citation
+FLM 10, 4; HCS 20, 24 – Generalized Linear Models and Exponential Family Distributions.
+
+### Required assumptions
+
+Events are independent.
+
+The log of the mean victim count is a linear function of predictors.
+
+Over-dispersion is present relative to Poisson.
+
+After conditioning on the missing-age indicator, age effects are interpretable.
+
+### How this method addresses the research question
+This model directly estimates how victim age group affects the expected number of victims per event, while accounting for missing age information and school context.
+### Variables used
+VictimCount, AgeGroup, IsAgeMissing, SchoolLevel, UrbanRural, TimeOfDay, FirearmType.
+
+### Simulation for Method 1: Negative Binomial Regression
+--Operating characteristics evaluated
+Bias, variance, mean squared error (MSE), and 95% confidence-interval coverage of age-group effects.
+
+--Simulation design
+We generate synthetic victim counts from a negative binomial distribution with known parameters chosen from the fitted real-data model. The model is refit to each simulated dataset and estimated coefficients are compared to the known true values to compute bias, MSE, and coverage.
+
+```{r}
+## ---- Method 1: Negative Binomial Regression (FIXED) ----
+
+library(MASS)
+
+# Use only rows with valid victim count and observed age group
+dat_nb <- dat %>%
+  filter(!is.na(victim_count), !is.na(age_group))
+
+# Fit negative binomial regression (NO age_missing here)
+fit_nb <- glm.nb(
+  victim_count ~ age_group,
+  data = dat_nb
+)
+
+# Model summary
+summary(fit_nb)
+
+# Incident Rate Ratios (exponentiated coefficients)
+exp_coef <- exp(coef(fit_nb))
+exp_ci   <- exp(confint(fit_nb))
+
+exp_coef
+exp_ci
+
+# Optional: compare with Poisson
+fit_pois <- glm(
+  victim_count ~ age_group,
+  data = dat_nb,
+  family = poisson
+)
+
+AIC(fit_pois, fit_nb)
+```
+
+### Result
+A negative binomial regression model was fitted to examine whether victim age group predicts the number of victims per school shooting event. Using Elementary age as the reference category, none of the other age groups showed a statistically significant effect on victim count: Middle (estimate = 0.028, p = 0.903), High (estimate = 0.044, p = 0.830), and Adult (estimate = 0.039, p = 0.853). The corresponding incident rate ratios were all close to one (Middle = 1.03, High = 1.05, Adult = 1.04), and their 95% confidence intervals were wide and all contained 1, indicating no meaningful difference in expected victim counts across age groups. Model comparison using AIC showed that the Poisson model (AIC = 1448.0) slightly outperformed the negative binomial model (AIC = 1450.0), suggesting that overdispersion is not substantial once age group is included. Overall, the regression analysis provides no evidence that victim age group is associated with the number of victims per event.
+
+### 3. Method 2 – Permutation test for age–victim association
+
+### Basic description
+Using only events with observed age groups, we test whether victim counts differ across age groups by randomly permuting age-group labels while keeping victim counts fixed. The observed test statistic (e.g., difference in group means or ANOVA F-statistic) is compared to the permutation distribution to obtain a nonparametric p-value.
+
+### Citation
+SCR 10 – Permutation and Randomization Methods.
+
+### Required assumptions
+
+Events are independent.
+
+Under the null hypothesis, age-group labels are exchangeable.
+
+The observed-age subset is approximately representative of the full sample.
+
+### How this method addresses the research question
+This provides a model-free test of whether victim numbers differ by age group, confirming the regression results without parametric assumptions.
+
+### Variables used
+VictimCount, AgeGroup
+
+### Simulation for Method 2: Permutation Test
+
+--Operating characteristics evaluated
+Type I error rate and statistical power.
+
+--Simulation design
+Under the null, victim counts are generated with the same mean across all age groups; under alternatives, different means are assigned to different age groups. For each dataset, the permutation test is applied. The rejection rates estimate Type I error and power.
+
+```{r}
+## ---- permutation test ----
+
+set.seed(123)
+
+dat_perm <- dat %>%
+  filter(!is.na(age_group), !is.na(victim_count))
+
+# observed test statistic: F-statistic from one-way ANOVA
+fit_obs <- lm(victim_count ~ age_group, data = dat_perm)
+anova_obs <- anova(fit_obs)
+F_obs <- anova_obs$`F value`[1]
+F_obs
+
+# permutation distribution
+B <- 5000  # number of permutations (increase if you want)
+F_perm <- numeric(B)
+
+for (b in seq_len(B)) {
+  perm_group <- sample(dat_perm$age_group)  # shuffle labels
+  
+  fit_perm <- lm(victim_count ~ perm_group, data = dat_perm)
+  F_perm[b] <- anova(fit_perm)$`F value`[1]
+}
+
+# permutation p-value (right tail)
+p_perm <- mean(F_perm >= F_obs)
+p_perm
+
+# (optional) visualize permutation distribution
+ggplot(data.frame(F_perm = F_perm), aes(x = F_perm)) +
+  geom_histogram(bins = 40) +
+  geom_vline(xintercept = F_obs, linetype = "dashed") +
+  labs(title   = "Permutation distribution of F-statistic",
+       subtitle = paste("Observed F =", round(F_obs, 3),
+                        "| p-value =", signif(p_perm, 3)),
+       x = "F-statistic", y = "Count")
+```
+
+### Result
+A permutation test was conducted to provide a nonparametric assessment of whether victim counts differ across age groups. The observed F-statistic from the one-way comparison of victim counts across the four age groups was 0.644. After randomly permuting age-group labels 5,000 times, the permutation distribution produced a p-value of 0.548, indicating that more than half of the randomized samples showed a test statistic at least as large as the observed one. The observed F-statistic lay near the center of the permutation distribution rather than in its upper tail. This result shows that the variation in victim counts across age groups is fully consistent with random chance under the null hypothesis of no age effect. Thus, the permutation test independently confirms the regression finding that victim age group is not significantly related to the number of victims per school shooting event.
+
+---------------------------------------------------------------------------------------------------------------------
+
